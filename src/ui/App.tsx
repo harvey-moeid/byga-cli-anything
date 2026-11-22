@@ -19,7 +19,7 @@ export default function App() {
   const [page, setPage] = useState("overview");
   const [repos, setRepos] = useState<Repo[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [stats, setStats] = useState<any>({});
+  const [stats, setStats] = useState<{ repositories: number }>({ repositories: 0 });
   const [error, setError] = useState("");
   const [url, setUrl] = useState("");
   const [selected, setSelected] = useState("");
