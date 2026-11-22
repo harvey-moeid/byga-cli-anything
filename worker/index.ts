@@ -265,7 +265,7 @@ app.get("/api/jobs/:id", async c => {
 
 app.get("/api/artifacts", async c => {
   const jobs = await c.env.DB.prepare(
-    "SELECT id,repository_full_name,workflow_run_id,created_at FROM jobs WHERE workflow_run_id IS NOT NULL ORDER BY created_at DESC LIMIT 10",
+    "SELECT id,repository_full_name,workflow_run_id,created_at FROM jobs WHERE workflow_run_id IS NOT NULL ORDER BY created_at DESC LIMIT 5",
   ).all<{ id: string; repository_full_name: string; workflow_run_id: number; created_at: string }>();
   const groups = await Promise.all(jobs.results.map(async job => {
     try {
