@@ -185,16 +185,54 @@ export default function App() {
 }
 
 function JobTable({ jobs }: { jobs: Job[] }) {
-  return <div className="table"><table><thead><tr><th>Repository</th><th>Task</th><th>Status</th><th>Created</th></tr></thead>
-    <tbody>{jobs.map(job => <tr key={job.id}>
-      <td>{job.repository_full_name}<small>{job.id.slice(0, 8)} · {job.ref}</small></td>
-      <td>{job.task}</td><td><span className={"status " + job.status.toLowerCase()}>{job.status}</span></td>
-      <td>{new Date(job.created_at).toLocaleString("id-ID")}</td>
-    </tr>)}</tbody></table>
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [logText, setLogText] = useState<Record<string, string>>({});
+  const [logLoading, setLogLoading] = useState<string | null>(null);
+  const [logError, setLogError] = useState("");
+
+  async function toggleLogs(job: Job) {
+    if (expanded === job.id) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(job.id);
+    setLogError("");
+    if (logText[job.id]) return;
+    setLogLoading(job.id);
+    try {
+      const data = await request("/api/jobs/" + job.id + "/logs");
+      const combined = (data.jobs || []).map((item: { name: string; status: string; conclusion: string | null; logs: string }) =>
+        "=== " + item.name + " · " + item.status + " · " + (item.conclusion || "in progress") + " ===\n" + item.logs
+      ).join("\n\n");
+      setLogText(previous => ({ ...previous, [job.id]: combined || "No log output returned." }));
+    } catch (cause) {
+      setLogError(cause instanceof Error ? cause.message : "Log retrieval failed");
+    } finally {
+      setLogLoading(null);
+    }
+  }
+
+  return <div className="table">
+    <table><thead><tr><th>Repository</th><th>Task</th><th>Status</th><th>Created</th><th>Logs</th></tr></thead>
+      <tbody>{jobs.map(job => <tr key={job.id}>
+        <td>{job.repository_full_name}<small>{job.id.slice(0, 8)} · {job.ref}</small></td>
+        <td>{job.task}</td>
+        <td><span className={"status " + job.status.toLowerCase()}>{job.status}</span></td>
+        <td>{new Date(job.created_at).toLocaleString("id-ID")}</td>
+        <td><button className="logButton" disabled={!job.workflow_url || logLoading === job.id} onClick={() => void toggleLogs(job)}>
+          {logLoading === job.id ? "Loading…" : expanded === job.id ? "Hide" : "View"}
+        </button></td>
+      </tr>)}</tbody>
+    </table>
+    {expanded && <section className="report">
+      <b>Execution logs · {expanded.slice(0, 8)}</b>
+      {logError && <p>{logError}</p>}
+      <pre>{logText[expanded] || (logLoading === expanded ? "Loading logs…" : "Logs not available yet.")}</pre>
+    </section>}
     {jobs.filter(job => job.result_json).map(job => <details className="report" key={job.id}>
       <summary>Audit report · {job.repository_full_name} · {job.id.slice(0, 8)}</summary>
       <pre>{(() => { try { return JSON.stringify(JSON.parse(job.result_json || "{}"), null, 2); } catch { return "Report JSON tidak valid."; } })()}</pre>
-      {job.workflow_url && <a href={job.workflow_url} target="_blank" rel="noreferrer">Open workflow logs ↗</a>}
+      {job.workflow_url && <a href={job.workflow_url} target="_blank" rel="noreferrer">Open workflow ↗</a>}
     </details>)}
     {!jobs.length && <p>No executions yet.</p>}
   </div>;
