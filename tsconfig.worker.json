@@ -10,7 +10,10 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
-    "strict": true
+    "strict": true,
+    "types": [
+      "@cloudflare/workers-types"
+    ]
   },
   "include": [
     "worker"
