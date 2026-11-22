@@ -1,9 +1,9 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Env } from "./types";
 
-const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+type AppEnv = { Bindings: Env; Variables: { actor: string } };\ntype AppContext = Context<AppEnv>;\ntype GithubRepository = { id: number; owner: { login: string }; name: string; full_name: string; default_branch: string; visibility: string; description: string | null; archived: boolean; disabled: boolean };\ntype GithubBranch = { name: string; commit: { sha: string } };\ntype RepositoryRow = { id: string; full_name: string };\nconst app = new Hono<AppEnv>();
 const now = () => new Date().toISOString();
 
 app.use("/api/*", async (c, next) => {
@@ -36,7 +36,7 @@ app.use("/api/*", async (c, next) => {
   await next();
 });
 
-async function github(c: any, path: string, init: RequestInit = {}) {
+async function github<T = unknown>(c: AppContext, path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch("https://api.github.com" + path, {
     ...init,
     headers: {
@@ -49,10 +49,10 @@ async function github(c: any, path: string, init: RequestInit = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error((data as any).message || "GitHub API " + response.status);
-  return data as any;
+  return data as T;
 }
 
-async function audit(c: any, action: string, target?: string, metadata?: unknown) {
+async function audit(c: AppContext, action: string, target?: string, metadata?: unknown) {
   await c.env.DB.prepare(
     "INSERT INTO audit_events(actor,action,target,metadata_json,created_at) VALUES(?,?,?,?,?)",
   ).bind(c.get("actor"), action, target || null, metadata ? JSON.stringify(metadata) : null, now()).run();
@@ -62,10 +62,10 @@ app.get("/api/health", c => c.json({ status: "ok", service: "byga-cli-anything-a
 
 app.get("/api/dashboard", async c => {
   const [repositories, jobs, artifacts, activity] = await Promise.all([
-    c.env.DB.prepare("SELECT COUNT(*) total FROM repositories WHERE allowed=1").first<any>(),
-    c.env.DB.prepare("SELECT status,COUNT(*) total FROM jobs GROUP BY status").all<any>(),
-    c.env.DB.prepare("SELECT COUNT(*) total FROM jobs WHERE status='COMPLETED'").first<any>(),
-    c.env.DB.prepare("SELECT id,repository_full_name,task,status,created_at FROM jobs ORDER BY created_at DESC LIMIT 8").all<any>(),
+    c.env.DB.prepare("SELECT COUNT(*) total FROM repositories WHERE allowed=1").first<{ total: number }>(),
+    c.env.DB.prepare("SELECT status,COUNT(*) total FROM jobs GROUP BY status").all<Array<{ status: string; total: number }>>(),
+    c.env.DB.prepare("SELECT COUNT(*) total FROM jobs WHERE status='COMPLETED'").first<{ total: number }>(),
+    c.env.DB.prepare("SELECT id,repository_full_name,task,status,created_at FROM jobs ORDER BY created_at DESC LIMIT 8").all<Array<{ id: string; repository_full_name: string; task: string; status: string; created_at: string }>>(),
   ]);
   return c.json({
     repositories: repositories?.total || 0,
@@ -88,7 +88,7 @@ app.post("/api/repositories", async c => {
     return c.json({ error: "Format repository harus owner/name" }, 400);
   }
   try {
-    const remote = await github(c, "/repos/" + fullName);
+    const remote = await github<GithubRepository>(c, "/repos/" + fullName);
     if (remote.archived || remote.disabled) return c.json({ error: "Repository archived/disabled" }, 400);
     const timestamp = now();
     await c.env.DB.prepare(
@@ -102,7 +102,7 @@ app.post("/api/repositories", async c => {
 });
 
 app.delete("/api/repositories/:id", async c => {
-  const row = await c.env.DB.prepare("SELECT full_name FROM repositories WHERE id=?").bind(c.req.param("id")).first<any>();
+  const row = await c.env.DB.prepare("SELECT full_name FROM repositories WHERE id=?").bind(c.req.param("id")).first<{ full_name: string }>();
   if (!row) return c.json({ error: "Repository not found" }, 404);
   await c.env.DB.prepare("UPDATE repositories SET allowed=0,updated_at=? WHERE id=?").bind(now(), c.req.param("id")).run();
   await audit(c, "repository.disallow", row.full_name);
@@ -110,11 +110,11 @@ app.delete("/api/repositories/:id", async c => {
 });
 
 app.get("/api/repositories/:id/branches", async c => {
-  const row = await c.env.DB.prepare("SELECT full_name FROM repositories WHERE id=? AND allowed=1").bind(c.req.param("id")).first<any>();
+  const row = await c.env.DB.prepare("SELECT full_name FROM repositories WHERE id=? AND allowed=1").bind(c.req.param("id")).first<RepositoryRow>();
   if (!row) return c.json({ error: "Repository not allowlisted" }, 404);
   try {
-    const branches = await github(c, "/repos/" + row.full_name + "/branches?per_page=100");
-    return c.json(branches.map((branch: any) => ({ name: branch.name, sha: branch.commit.sha })));
+    const branches = await github<GithubBranch[]>(c, "/repos/" + row.full_name + "/branches?per_page=100");
+    return c.json(branches.map(branch => ({ name: branch.name, sha: branch.commit.sha })));
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "GitHub error" }, 502);
   }
@@ -155,7 +155,7 @@ app.post("/api/jobs", async c => {
 });
 
 app.get("/api/jobs", async c => {
-  const rows = await c.env.DB.prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 50").all();
+  const rows = await c.env.DB.prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 50").all<Record<string, unknown>>();
   return c.json(rows.results);
 });
 app.get("/api/jobs/:id", async c => {
@@ -167,7 +167,7 @@ app.get("/api/integrations", c => c.json({
   agent: "not-configured", execution: "manual-github-actions",
 }));
 app.get("/api/activity", async c => {
-  const rows = await c.env.DB.prepare("SELECT * FROM audit_events ORDER BY id DESC LIMIT 50").all();
+  const rows = await c.env.DB.prepare("SELECT * FROM audit_events ORDER BY id DESC LIMIT 50").all<Record<string, unknown>>();
   return c.json(rows.results);
 });
 app.onError((error, c) => {
