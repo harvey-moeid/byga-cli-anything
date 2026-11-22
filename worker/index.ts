@@ -31,6 +31,8 @@ app.post("/internal/job-callback", async c => {
   if (!supplied || !(await sameSecret(supplied, c.env.JOB_CALLBACK_SECRET))) {
     return c.json({ error: "Unauthorized callback" }, 401);
   }
+  const contentLength = Number(c.req.header("Content-Length") || 0);
+  if (contentLength > 65536) return c.json({ error: "Callback payload too large" }, 413);
   const body = await c.req.json().catch(() => null);
   const jobId = String(body?.job_id || "");
   const status = String(body?.status || "");
@@ -197,7 +199,7 @@ app.post("/api/jobs", async c => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref: "main", inputs: { job_id: id, target_repo: repository.full_name, target_ref: ref, task } }),
     });
-    await c.env.DB.prepare("UPDATE jobs SET status='QUEUED' WHERE id=?").bind(id).run();
+    await c.env.DB.prepare("UPDATE jobs SET status='QUEUED' WHERE id=? AND status='CREATED'").bind(id).run();
     return c.json({ id, status: "QUEUED" }, 202);
   } catch (error) {
     await c.env.DB.prepare("UPDATE jobs SET status='FAILED',error_message=?,completed_at=? WHERE id=?")
