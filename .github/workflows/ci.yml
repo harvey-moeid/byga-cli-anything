@@ -20,6 +20,8 @@ jobs:
         run: corepack enable
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm audit
+      - run: python3 -m py_compile scripts/audit_target.py tests/test_audit_target.py
+      - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: pnpm run typecheck
       - run: pnpm run lint
       - run: pnpm test
