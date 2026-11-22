@@ -1,11 +1,25 @@
 name: Manual CLI harness job
+run-name: BYGA CLI-Anything · ${{ inputs.job_id }}
 on:
   workflow_dispatch:
     inputs:
-      job_id: {description: D1 job UUID, required: true, type: string}
-      target_repo: {description: Allowlisted owner/repository, required: true, type: string}
-      target_ref: {description: Branch/tag/commit, required: true, type: string}
-      task: {description: audit or generate, required: true, type: choice, options: [audit, generate]}
+      job_id:
+        description: D1 job UUID
+        required: true
+        type: string
+      target_repo:
+        description: Allowlisted owner/repository
+        required: true
+        type: string
+      target_ref:
+        description: Branch, tag or commit
+        required: true
+        type: string
+      task:
+        description: audit or generate
+        required: true
+        type: choice
+        options: [audit, generate]
 permissions:
   contents: read
   actions: read
@@ -18,30 +32,97 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Validate inputs
-        env: {TARGET_REPO: "${{ inputs.target_repo }}", TARGET_REF: "${{ inputs.target_ref }}"}
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_REF: ${{ inputs.target_ref }}
         run: |
           [[ "$TARGET_REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]]
           [[ "$TARGET_REF" =~ ^[A-Za-z0-9._/-]+$ ]]
           [[ "$TARGET_REF" != *..* ]]
-      - uses: actions/checkout@v4
-        with: {path: control-plane, persist-credentials: false}
-      - uses: actions/checkout@v4
+
+      - name: Checkout control plane
+        uses: actions/checkout@v4
         with:
-          repository: "${{ inputs.target_repo }}"
-          ref: "${{ inputs.target_ref }}"
+          path: control-plane
+          persist-credentials: false
+
+      - name: Notify job started
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          CALLBACK_URL: ${{ vars.JOB_CALLBACK_URL }}
+          CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          test -n "$CALLBACK_URL" && test -n "$CALLBACK_SECRET"
+          payload=$(jq -n --arg id "$JOB_ID" --arg url "$RUN_URL" --arg run "$GITHUB_RUN_ID" '{job_id:$id,status:"RUNNING",workflow_run_id:($run|tonumber),workflow_url:$url}')
+          curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
+
+      - name: Checkout target read-only
+        id: target
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repo }}
+          ref: ${{ inputs.target_ref }}
+          token: ${{ secrets.TARGET_REPO_READ_TOKEN || github.token }}
           path: target
           persist-credentials: false
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - name: Metadata audit only
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Metadata audit (no target code execution)
+        id: audit
         run: python control-plane/scripts/audit_target.py target > audit-report.json
-      - name: Generation is blocked until BYGA adapter is implemented and verified
+
+      - name: Notify testing
+        if: steps.audit.outcome == 'success'
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          CALLBACK_URL: ${{ vars.JOB_CALLBACK_URL }}
+          CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ steps.target.outputs.commit }}
+        run: |
+          payload=$(jq -n --arg id "$JOB_ID" --arg url "$RUN_URL" --arg sha "$COMMIT_SHA" '{job_id:$id,status:"TESTING",workflow_url:$url,commit_sha:$sha}')
+          curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
+
+      - name: Validate audit report
+        id: validate
+        if: steps.audit.outcome == 'success'
+        run: python -c 'import json; d=json.load(open("audit-report.json")); assert isinstance(d.get("file_count"), int); assert isinstance(d.get("dependency_manifests"), list); assert isinstance(d.get("license_files"), list)'
+
+      - name: Fail closed until BYGA generation adapter is verified
         if: inputs.task == 'generate'
         run: |
-          echo "BYGA agent HTTP adapter is not yet implemented. See docs/BYGA_AGENT_ADAPTER.md" >&2
+          echo "BYGA agent HTTP adapter is not configured and contract-tested. See docs/BYGA_AGENT_ADAPTER.md" >&2
           exit 2
-      - uses: actions/upload-artifact@v4
+
+      - name: Report final status
         if: always()
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          CALLBACK_URL: ${{ vars.JOB_CALLBACK_URL }}
+          CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ steps.target.outputs.commit }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          VALIDATION_OUTCOME: ${{ steps.validate.outcome }}
+          TASK: ${{ inputs.task }}
+        run: |
+          status=COMPLETED
+          error=""
+          if [[ "$AUDIT_OUTCOME" != "success" || "$VALIDATION_OUTCOME" != "success" || "$TASK" == "generate" ]]; then
+            status=FAILED
+            error="Audit, validation, or configured agent generation step failed."
+          fi
+          payload=$(jq -n --arg id "$JOB_ID" --arg status "$status" --arg url "$RUN_URL" --arg sha "$COMMIT_SHA" --arg error "$error" '{job_id:$id,status:$status,workflow_url:$url,commit_sha:$sha,error_message:$error}')
+          curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: byga-cli-anything-${{ inputs.job_id }}
           path: audit-report.json
