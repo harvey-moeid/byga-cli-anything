@@ -19,6 +19,7 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
       - run: pnpm install --no-frozen-lockfile
+      - run: pnpm audit --prod
       - run: pnpm run typecheck
       - run: pnpm run lint
       - run: pnpm test
