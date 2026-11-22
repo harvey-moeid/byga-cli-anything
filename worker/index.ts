@@ -212,6 +212,49 @@ app.get("/api/jobs", async c => {
   const rows = await c.env.DB.prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 50").all<Record<string, unknown>>();
   return c.json(rows.results);
 });
+
+app.get("/api/jobs/:id/logs", async c => {
+  const job = await c.env.DB.prepare(
+    "SELECT workflow_run_id,workflow_url FROM jobs WHERE id=?",
+  ).bind(c.req.param("id")).first<{ workflow_run_id: number | null; workflow_url: string | null }>();
+  if (!job) return c.json({ error: "Job not found" }, 404);
+  if (!job.workflow_run_id) return c.json({ error: "Workflow has not started yet" }, 409);
+  try {
+    const runJobs = await github<{ jobs: Array<{ id: number; name: string; status: string; conclusion: string | null }> }>(
+      c,
+      "/repos/" + c.env.GITHUB_OWNER + "/" + c.env.GITHUB_REPO + "/actions/runs/" + job.workflow_run_id + "/jobs?per_page=10",
+    );
+    const logs = await Promise.all(runJobs.jobs.slice(0, 5).map(async item => {
+      try {
+        const response = await fetch(
+          "https://api.github.com/repos/" + c.env.GITHUB_OWNER + "/" + c.env.GITHUB_REPO + "/actions/jobs/" + item.id + "/logs",
+          {
+            headers: {
+              Authorization: "Bearer " + c.env.GITHUB_TOKEN,
+              Accept: "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "BYGA-CLI-Anything",
+            },
+            redirect: "manual",
+          },
+        );
+        const location = response.headers.get("Location");
+        if (response.status >= 300 && response.status < 400 && location) {
+          const logResponse = await fetch(location);
+          const text = await logResponse.text();
+          return { name: item.name, status: item.status, conclusion: item.conclusion, logs: text.slice(-20000) };
+        }
+        return { name: item.name, status: item.status, conclusion: item.conclusion, logs: "GitHub log stream unavailable." };
+      } catch {
+        return { name: item.name, status: item.status, conclusion: item.conclusion, logs: "Unable to retrieve logs." };
+      }
+    }));
+    return c.json({ workflow_url: job.workflow_url, jobs: logs });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Workflow logs unavailable" }, 502);
+  }
+});
+
 app.get("/api/jobs/:id", async c => {
   const row = await c.env.DB.prepare("SELECT * FROM jobs WHERE id=?").bind(c.req.param("id")).first();
   return row ? c.json(row) : c.json({ error: "Job not found" }, 404);
