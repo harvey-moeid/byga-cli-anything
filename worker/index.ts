@@ -244,8 +244,18 @@ app.get("/api/jobs/:id/logs", async c => {
         const location = response.headers.get("Location");
         if (response.status >= 300 && response.status < 400 && location) {
           const logResponse = await fetch(location);
-          const text = await logResponse.text();
-          return { name: item.name, status: item.status, conclusion: item.conclusion, logs: text.slice(-20000) };
+          const reader = logResponse.body?.getReader();
+          const decoder = new TextDecoder();
+          let text = "";
+          if (reader) {
+            while (text.length < 20000) {
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              text += decoder.decode(chunk.value, { stream: true });
+            }
+            await reader.cancel();
+          }
+          return { name: item.name, status: item.status, conclusion: item.conclusion, logs: text.slice(0, 20000), truncated: text.length >= 20000 };
         }
         return { name: item.name, status: item.status, conclusion: item.conclusion, logs: "GitHub log stream unavailable." };
       } catch {
