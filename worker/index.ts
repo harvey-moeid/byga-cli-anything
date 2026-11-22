@@ -5,7 +5,7 @@ import type { Env } from "./types";
 
 type AppEnv = { Bindings: Env; Variables: { actor: string } };
 type AppContext = Context<AppEnv>;
-type GithubRepository = { id: number; owner: { login: string }; name: string; full_name: string; default_branch: string; visibility: string; description: string | null; archived: boolean; disabled: boolean };
+type GithubRepository = { id: number; owner: { login: string }; name: string; full_name: string; default_branch: string; visibility: string; description: string | null; size: number; archived: boolean; disabled: boolean };
 type GithubBranch = { name: string; commit: { sha: string } };
 type RepositoryRow = { id: string; full_name: string };
 const app = new Hono<AppEnv>();
@@ -144,6 +144,7 @@ app.post("/api/repositories", async c => {
   try {
     const remote = await github<GithubRepository>(c, "/repos/" + fullName);
     if (remote.archived || remote.disabled) return c.json({ error: "Repository archived/disabled" }, 400);
+    if (remote.size > 512000) return c.json({ error: "Repository exceeds the 500 MiB source limit" }, 413);
     const timestamp = now();
     await c.env.DB.prepare(
       "INSERT INTO repositories(id,owner,name,full_name,default_branch,visibility,description,allowed,created_at,updated_at) VALUES(?,?,?,?,?,?,?,1,?,?) ON CONFLICT(full_name) DO UPDATE SET default_branch=excluded.default_branch,visibility=excluded.visibility,description=excluded.description,allowed=1,updated_at=excluded.updated_at",
@@ -187,6 +188,8 @@ app.post("/api/jobs", async c => {
   }
   const repository = await c.env.DB.prepare("SELECT * FROM repositories WHERE id=? AND allowed=1").bind(repositoryId).first<RepositoryRow>();
   if (!repository) return c.json({ error: "Repository tidak ada dalam allowlist" }, 404);
+  await c.env.DB.prepare("DELETE FROM jobs WHERE completed_at IS NOT NULL AND julianday(completed_at) < julianday('now', '-90 days')").run();
+  await c.env.DB.prepare("DELETE FROM audit_events WHERE julianday(created_at) < julianday('now', '-180 days')").run();
   const id = crypto.randomUUID();
   const createdAt = now();
   await c.env.DB.prepare(
