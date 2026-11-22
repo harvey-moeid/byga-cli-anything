@@ -219,11 +219,8 @@ function JobTable({ jobs }: { jobs: Job[] }) {
     try {
       const data = await request("/api/jobs/" + job.id + "/logs");
       const combined = (data.jobs || []).map((item: { name: string; status: string; conclusion: string | null; logs: string }) =>
-        "=== " + item.name + " · " + item.status + " · " + (item.conclusion || "in progress") + " ===
-" + item.logs
-      ).join("
-
-");
+        "=== " + item.name + " · " + item.status + " · " + (item.conclusion || "in progress") + " ===\n" + item.logs
+      ).join("\n");
       setLogText(previous => ({ ...previous, [job.id]: combined || "No log output returned." }));
     } catch (cause) {
       setLogError(cause instanceof Error ? cause.message : "Log retrieval failed");
