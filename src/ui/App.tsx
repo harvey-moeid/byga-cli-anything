@@ -1,23 +1,101 @@
 import { useEffect, useState, type FormEvent } from "react";
+import "./auth.css";
 
 type Repo = { id: string; full_name: string; default_branch: string; visibility: string };
 type Job = { id: string; repository_full_name: string; ref: string; task: string; status: string; created_at: string; result_json?: string | null; workflow_url?: string | null };
 type Branch = { name: string; sha: string };
 type Artifact = { id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string; job_id: string; repository_full_name: string };
+type AuthState = "loading" | "anonymous" | "authenticated";
 const API = import.meta.env.VITE_API_BASE || "";
 
+// The CSRF token lives only in memory: it is re-issued by /api/auth/session after a reload.
+let csrfToken = "";
+let unauthorizedHandler: (() => void) | null = null;
+
 async function request(path: string, init?: RequestInit) {
+  const method = (init?.method || "GET").toUpperCase();
   const response = await fetch(API + path, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(csrfToken && method !== "GET" ? { "X-CSRF-Token": csrfToken } : {}),
+      ...(init?.headers || {}),
+    },
     credentials: "include",
   });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && !path.startsWith("/api/auth/")) unauthorizedHandler?.();
   if (!response.ok) throw new Error(data.error || "Request failed");
   return data;
 }
 
 export default function App() {
+  const [auth, setAuth] = useState<AuthState>("loading");
+
+  useEffect(() => {
+    unauthorizedHandler = () => { csrfToken = ""; setAuth("anonymous"); };
+    request("/api/auth/session")
+      .then(data => {
+        if (data.authenticated) { csrfToken = String(data.csrfToken || ""); setAuth("authenticated"); }
+        else setAuth("anonymous");
+      })
+      .catch(() => setAuth("anonymous"));
+    return () => { unauthorizedHandler = null; };
+  }, []);
+
+  async function signOut(path: string) {
+    try {
+      await request(path, { method: "POST" });
+    } catch {
+      // The local session is dropped either way; the server-side session expires on its own.
+    }
+    csrfToken = "";
+    setAuth("anonymous");
+  }
+
+  if (auth === "loading") return <div className="login-wrap"><p className="login-note">Memuat…</p></div>;
+  if (auth === "anonymous") return <LoginScreen onSuccess={token => { csrfToken = token; setAuth("authenticated"); }} />;
+  return <Dashboard onLogout={() => void signOut("/api/auth/logout")} onLogoutAll={() => void signOut("/api/auth/logout-all")} />;
+}
+
+function LoginScreen({ onSuccess }: { onSuccess: (csrf: string) => void }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const data = await request("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) });
+      setPassword("");
+      onSuccess(String(data.csrfToken || ""));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="login-wrap">
+      <form className="login-card" onSubmit={event => void submit(event)}>
+        <div className="brand"><b className="mark">B</b><div><b>BYGA</b><small>CLI-Anything</small></div></div>
+        <h1>Masuk</h1>
+        <p>Masukkan password aplikasi untuk membuka dashboard.</p>
+        {error && <div className="alert" role="alert">{error}</div>}
+        <label>Password
+          <input type="password" autoComplete="current-password" value={password} maxLength={1024} required autoFocus
+            onChange={event => setPassword(event.target.value)} />
+        </label>
+        <button disabled={busy || !password}>{busy ? "Memeriksa…" : "Masuk"}</button>
+      </form>
+    </div>
+  );
+}
+
+function Dashboard({ onLogout, onLogoutAll }: { onLogout: () => void; onLogoutAll: () => void }) {
   const [page, setPage] = useState("overview");
   const [repos, setRepos] = useState<Repo[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -130,7 +208,10 @@ export default function App() {
       <main>
         <header>
           <div><small>CONTROL PLANE / SECURE EXECUTION</small><h1>{navigation.find(([id]) => id === page)?.[1]}</h1></div>
-          <button className="secondary" onClick={() => void refresh()}>↻ Refresh</button>
+          <div className="header-actions">
+            <button className="secondary" onClick={() => void refresh()}>↻ Refresh</button>
+            <button className="secondary" onClick={onLogout}>Sign out</button>
+          </div>
         </header>
         {error && <div className="alert">{error}</div>}
 
@@ -194,9 +275,10 @@ export default function App() {
         </section>}
 
         {page === "settings" && <section className="panel">
-          <h3>Integrations &amp; security</h3><p>GitHub API: Worker secret required</p><p>Cloudflare Access: required</p>
+          <h3>Integrations &amp; security</h3><p>GitHub API: Worker secret required</p><p>Authentication: password session (HttpOnly cookie)</p>
           <p>BYGA Agent: adapter not configured</p><p>Execution: manual workflow_dispatch</p>
           <small>Secrets tidak pernah ditampilkan di dashboard.</small>
+          <p><button className="danger" onClick={() => { if (window.confirm("Sign out of every device?")) onLogoutAll(); }}>Sign out of all devices</button></p>
         </section>}
         <footer>BYGA CLI-Anything · Secure by default · No automatic deployment</footer>
       </main>
