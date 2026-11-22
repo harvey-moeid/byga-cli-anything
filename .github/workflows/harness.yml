@@ -1,0 +1,135 @@
+name: Manual CLI harness job
+run-name: BYGA CLI-Anything · ${{ inputs.job_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: D1 job UUID
+        required: true
+        type: string
+      target_repo:
+        description: Allowlisted owner/repository
+        required: true
+        type: string
+      target_ref:
+        description: Branch, tag or commit
+        required: true
+        type: string
+      task:
+        description: audit or generate
+        required: true
+        type: choice
+        options: [audit, generate]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: harness-${{ inputs.job_id }}
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate inputs
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_REF: ${{ inputs.target_ref }}
+        run: |
+          [[ "$TARGET_REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$TARGET_REF" =~ ^[A-Za-z0-9._/-]+$ ]]
+          [[ "$TARGET_REF" != *..* ]]
+
+      - name: Checkout control plane
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control-plane
+          persist-credentials: false
+
+      - name: Notify job started
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          CALLBACK_URL: ${{ vars.JOB_CALLBACK_URL }}
+          CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          CALLBACK_URL="${CALLBACK_URL%/}"
+          test -n "$CALLBACK_URL" && test -n "$CALLBACK_SECRET"
+          payload=$(jq -n --arg id "$JOB_ID" --arg url "$RUN_URL" --arg run "$GITHUB_RUN_ID" '{job_id:$id,status:"RUNNING",workflow_run_id:($run|tonumber),workflow_url:$url}')
+          curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
+
+      - name: Checkout target read-only
+        id: target
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ inputs.target_repo }}
+          ref: ${{ inputs.target_ref }}
+          token: ${{ secrets.TARGET_REPO_READ_TOKEN || github.token }}
+          path: target
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: '3.12'
+
+      - name: Metadata audit (no target code execution)
+        id: audit
+        run: python control-plane/scripts/audit_target.py target > audit-report.json
+
+      - name: Notify testing
+        if: steps.audit.outcome == 'success'
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          CALLBACK_URL: ${{ vars.JOB_CALLBACK_URL }}
+          CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ steps.target.outputs.commit }}
+        run: |
+          CALLBACK_URL="${CALLBACK_URL%/}"
+          payload=$(jq -n --arg id "$JOB_ID" --arg url "$RUN_URL" --arg sha "$COMMIT_SHA" '{job_id:$id,status:"TESTING",workflow_url:$url,commit_sha:$sha}')
+          curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
+
+      - name: Validate audit report
+        id: validate
+        if: steps.audit.outcome == 'success'
+        run: python -c 'import json; d=json.load(open("audit-report.json")); assert isinstance(d.get("file_count"), int); assert isinstance(d.get("dependency_manifests"), list); assert isinstance(d.get("license_files"), list)'
+
+      - name: Fail closed until BYGA generation adapter is verified
+        if: inputs.task == 'generate'
+        run: |
+          echo "BYGA agent HTTP adapter is not configured and contract-tested. See docs/BYGA_AGENT_ADAPTER.md" >&2
+          exit 2
+
+      - name: Report final status
+        if: always()
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          CALLBACK_URL: ${{ vars.JOB_CALLBACK_URL }}
+          CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ steps.target.outputs.commit }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          VALIDATION_OUTCOME: ${{ steps.validate.outcome }}
+          TASK: ${{ inputs.task }}
+        run: |
+          CALLBACK_URL="${CALLBACK_URL%/}"
+          report="{}"
+          if [[ -f audit-report.json ]]; then report=$(jq -c '{file_count, license_file_count:(.license_files|length), dependency_manifest_count:(.dependency_manifests|length), workflow_file_count:(.workflow_files|length), warnings}' audit-report.json); fi
+          status=COMPLETED
+          error=""
+          if [[ "$AUDIT_OUTCOME" != "success" || "$VALIDATION_OUTCOME" != "success" || "$TASK" == "generate" ]]; then
+            status=FAILED
+            error="Audit, validation, or configured agent generation step failed."
+          fi
+          payload=$(jq -n --arg id "$JOB_ID" --arg status "$status" --arg url "$RUN_URL" --arg sha "$COMMIT_SHA" --arg error "$error" --argjson result "$report" '{job_id:$id,status:$status,workflow_url:$url,commit_sha:$sha,error_message:$error,result_json:$result}')
+          curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: byga-cli-anything-${{ inputs.job_id }}
+          path: audit-report.json
+          if-no-files-found: warn
+          retention-days: 7
