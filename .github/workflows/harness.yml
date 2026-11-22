@@ -111,13 +111,15 @@ jobs:
           VALIDATION_OUTCOME: ${{ steps.validate.outcome }}
           TASK: ${{ inputs.task }}
         run: |
+          report="{}"
+          if [[ -f audit-report.json ]]; then report=$(cat audit-report.json); fi
           status=COMPLETED
           error=""
           if [[ "$AUDIT_OUTCOME" != "success" || "$VALIDATION_OUTCOME" != "success" || "$TASK" == "generate" ]]; then
             status=FAILED
             error="Audit, validation, or configured agent generation step failed."
           fi
-          payload=$(jq -n --arg id "$JOB_ID" --arg status "$status" --arg url "$RUN_URL" --arg sha "$COMMIT_SHA" --arg error "$error" '{job_id:$id,status:$status,workflow_url:$url,commit_sha:$sha,error_message:$error}')
+          payload=$(jq -n --arg id "$JOB_ID" --arg status "$status" --arg url "$RUN_URL" --arg sha "$COMMIT_SHA" --arg error "$error" --argjson result "$report" '{job_id:$id,status:$status,workflow_url:$url,commit_sha:$sha,error_message:$error,result_json:$result}')
           curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
 
       - name: Upload audit report
