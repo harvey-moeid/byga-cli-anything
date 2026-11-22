@@ -214,6 +214,74 @@ app.get("/api/jobs/:id", async c => {
   const row = await c.env.DB.prepare("SELECT * FROM jobs WHERE id=?").bind(c.req.param("id")).first();
   return row ? c.json(row) : c.json({ error: "Job not found" }, 404);
 });
+
+app.get("/api/artifacts", async c => {
+  const jobs = await c.env.DB.prepare(
+    "SELECT id,repository_full_name,workflow_run_id,created_at FROM jobs WHERE workflow_run_id IS NOT NULL ORDER BY created_at DESC LIMIT 10",
+  ).all<{ id: string; repository_full_name: string; workflow_run_id: number; created_at: string }>();
+  const groups = await Promise.all(jobs.results.map(async job => {
+    try {
+      const data = await github<{ artifacts: Array<{ id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string }> }>(
+        c,
+        "/repos/" + c.env.GITHUB_OWNER + "/" + c.env.GITHUB_REPO + "/actions/runs/" + job.workflow_run_id + "/artifacts",
+      );
+      return data.artifacts.map(artifact => ({
+        ...artifact,
+        job_id: job.id,
+        repository_full_name: job.repository_full_name,
+        workflow_run_id: job.workflow_run_id,
+      }));
+    } catch {
+      return [];
+    }
+  }));
+  return c.json(groups.flat());
+});
+
+app.get("/api/artifacts/:artifactId/download", async c => {
+  const jobId = c.req.query("jobId") || "";
+  const artifactId = Number(c.req.param("artifactId"));
+  if (!jobId || !Number.isSafeInteger(artifactId) || artifactId <= 0) {
+    return c.json({ error: "Invalid artifact reference" }, 400);
+  }
+  const job = await c.env.DB.prepare(
+    "SELECT workflow_run_id FROM jobs WHERE id=? AND workflow_run_id IS NOT NULL",
+  ).bind(jobId).first<{ workflow_run_id: number }>();
+  if (!job) return c.json({ error: "Job has no completed workflow run" }, 404);
+  try {
+    const listed = await github<{ artifacts: Array<{ id: number; expired: boolean }> }>(
+      c,
+      "/repos/" + c.env.GITHUB_OWNER + "/" + c.env.GITHUB_REPO + "/actions/runs/" + job.workflow_run_id + "/artifacts",
+    );
+    const artifact = listed.artifacts.find(item => item.id === artifactId);
+    if (!artifact || artifact.expired) return c.json({ error: "Artifact not found or expired" }, 404);
+    const response = await fetch(
+      "https://api.github.com/repos/" + c.env.GITHUB_OWNER + "/" + c.env.GITHUB_REPO + "/actions/artifacts/" + artifactId + "/zip",
+      {
+        headers: {
+          Authorization: "Bearer " + c.env.GITHUB_TOKEN,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "BYGA-CLI-Anything",
+        },
+        redirect: "manual",
+      },
+    );
+    const location = response.headers.get("Location");
+    if (response.status >= 300 && response.status < 400 && location) return c.redirect(location, 302);
+    if (!response.ok) return c.json({ error: "GitHub artifact download failed" }, 502);
+    return new Response(response.body, {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": 'attachment; filename="byga-artifact-' + artifactId + '.zip"',
+        "Cache-Control": "private, no-store",
+      },
+    });
+  } catch {
+    return c.json({ error: "Artifact download failed" }, 502);
+  }
+});
+
 app.get("/api/integrations", c => c.json({
   github: "worker-secret-required", cloudflare: "worker-active",
   agent: "not-configured", execution: "manual-github-actions",
