@@ -5,9 +5,10 @@ workers_dev = true
 [vars]
 GITHUB_OWNER = "harvey-moeid"
 GITHUB_REPO = "byga-cli-anything"
-ACCESS_TEAM_DOMAIN = "REPLACE_WITH_TEAM.cloudflareaccess.com"
-ACCESS_AUD = "REPLACE_WITH_ACCESS_AUD"
 APP_ORIGIN = "https://REPLACE_WITH_PAGES_DOMAIN.pages.dev"
+# Lax requires the app and API to share a site (same origin or a custom domain with a route).
+# Only use None for a cross-site Pages + workers.dev deployment; see docs/SECURITY.md.
+COOKIE_SAMESITE = "Lax"
 [[d1_databases]]
 binding = "DB"
 database_name = "byga-cli-anything"
