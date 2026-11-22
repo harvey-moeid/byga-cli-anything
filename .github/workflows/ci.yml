@@ -19,11 +19,6 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
       - run: pnpm install --no-frozen-lockfile
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: temporary-pnpm-lock
-          path: pnpm-lock.yaml
-          retention-days: 1
       - run: pnpm audit --prod
       - run: pnpm run typecheck
       - run: pnpm run lint
