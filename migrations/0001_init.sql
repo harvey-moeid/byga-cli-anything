@@ -1,0 +1,5 @@
+PRAGMA foreign_keys=ON;
+CREATE TABLE IF NOT EXISTS repositories(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,full_name TEXT NOT NULL UNIQUE,default_branch TEXT NOT NULL,visibility TEXT NOT NULL,description TEXT,allowed INTEGER NOT NULL DEFAULT 1 CHECK(allowed IN(0,1)),created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,repository_id TEXT NOT NULL REFERENCES repositories(id),repository_full_name TEXT NOT NULL,ref TEXT NOT NULL,commit_sha TEXT,task TEXT NOT NULL CHECK(task IN('audit','generate')),status TEXT NOT NULL CHECK(status IN('CREATED','QUEUED','RUNNING','TESTING','COMPLETED','FAILED','CANCELLED')),workflow_run_id INTEGER,workflow_url TEXT,result_json TEXT,error_message TEXT,created_at TEXT NOT NULL,started_at TEXT,completed_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE TABLE IF NOT EXISTS audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,target TEXT,metadata_json TEXT,created_at TEXT NOT NULL);

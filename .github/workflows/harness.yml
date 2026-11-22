@@ -1,0 +1,49 @@
+name: Manual CLI harness job
+on:
+  workflow_dispatch:
+    inputs:
+      job_id: {description: D1 job UUID, required: true, type: string}
+      target_repo: {description: Allowlisted owner/repository, required: true, type: string}
+      target_ref: {description: Branch/tag/commit, required: true, type: string}
+      task: {description: audit or generate, required: true, type: choice, options: [audit, generate]}
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: harness-${{ inputs.job_id }}
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate inputs
+        env: {TARGET_REPO: "${{ inputs.target_repo }}", TARGET_REF: "${{ inputs.target_ref }}"}
+        run: |
+          [[ "$TARGET_REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$TARGET_REF" =~ ^[A-Za-z0-9._/-]+$ ]]
+          [[ "$TARGET_REF" != *..* ]]
+      - uses: actions/checkout@v4
+        with: {path: control-plane, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: "${{ inputs.target_repo }}"
+          ref: "${{ inputs.target_ref }}"
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Metadata audit only
+        run: python control-plane/scripts/audit_target.py target > audit-report.json
+      - name: Generation is blocked until BYGA adapter is implemented and verified
+        if: inputs.task == 'generate'
+        run: |
+          echo "BYGA agent HTTP adapter is not yet implemented. See docs/BYGA_AGENT_ADAPTER.md" >&2
+          exit 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: byga-cli-anything-${{ inputs.job_id }}
+          path: audit-report.json
+          if-no-files-found: warn
+          retention-days: 7

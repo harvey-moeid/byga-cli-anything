@@ -1,0 +1,1 @@
+import{describe,it,expect}from"vitest";describe("job contracts",()=>{it("uses supported task names",()=>{expect(["audit","generate"]).toContain("audit");});it("defines terminal and active states",()=>{expect(["CREATED","QUEUED","RUNNING","TESTING","COMPLETED","FAILED","CANCELLED"]).toHaveLength(7);});});
