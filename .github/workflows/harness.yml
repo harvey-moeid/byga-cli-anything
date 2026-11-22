@@ -53,6 +53,7 @@ jobs:
           CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          CALLBACK_URL="${CALLBACK_URL%/}"
           test -n "$CALLBACK_URL" && test -n "$CALLBACK_SECRET"
           payload=$(jq -n --arg id "$JOB_ID" --arg url "$RUN_URL" --arg run "$GITHUB_RUN_ID" '{job_id:$id,status:"RUNNING",workflow_run_id:($run|tonumber),workflow_url:$url}')
           curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
@@ -85,6 +86,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ steps.target.outputs.commit }}
         run: |
+          CALLBACK_URL="${CALLBACK_URL%/}"
           payload=$(jq -n --arg id "$JOB_ID" --arg url "$RUN_URL" --arg sha "$COMMIT_SHA" '{job_id:$id,status:"TESTING",workflow_url:$url,commit_sha:$sha}')
           curl --fail --silent --show-error -X POST "$CALLBACK_URL/internal/job-callback" -H "Authorization: Bearer $CALLBACK_SECRET" -H "Content-Type: application/json" -d "$payload"
 
@@ -111,6 +113,7 @@ jobs:
           VALIDATION_OUTCOME: ${{ steps.validate.outcome }}
           TASK: ${{ inputs.task }}
         run: |
+          CALLBACK_URL="${CALLBACK_URL%/}"
           report="{}"
           if [[ -f audit-report.json ]]; then report=$(jq -c '{file_count, license_file_count:(.license_files|length), dependency_manifest_count:(.dependency_manifests|length), workflow_file_count:(.workflow_files|length), warnings}' audit-report.json); fi
           status=COMPLETED
