@@ -47,8 +47,8 @@ async function github<T = unknown>(c: AppContext, path: string, init: RequestIni
       ...(init.headers || {}),
     },
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error((data as any).message || "GitHub API " + response.status);
+  const data = await response.json().catch(() => ({})) as { message?: string };
+  if (!response.ok) throw new Error(data.message || "GitHub API " + response.status);
   return data as T;
 }
 
@@ -131,7 +131,7 @@ app.post("/api/jobs", async c => {
   if (ref.length > 255 || !new RegExp("^[A-Za-z0-9._/-]+$").test(ref) || ref.includes("..")) {
     return c.json({ error: "Ref tidak valid" }, 400);
   }
-  const repository = await c.env.DB.prepare("SELECT * FROM repositories WHERE id=? AND allowed=1").bind(repositoryId).first<any>();
+  const repository = await c.env.DB.prepare("SELECT * FROM repositories WHERE id=? AND allowed=1").bind(repositoryId).first<RepositoryRow>();
   if (!repository) return c.json({ error: "Repository tidak ada dalam allowlist" }, 404);
   const id = crypto.randomUUID();
   const createdAt = now();
