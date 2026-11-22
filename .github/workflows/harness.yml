@@ -41,7 +41,7 @@ jobs:
           [[ "$TARGET_REF" != *..* ]]
 
       - name: Checkout control plane
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           path: control-plane
           persist-credentials: false
@@ -59,7 +59,7 @@ jobs:
 
       - name: Checkout target read-only
         id: target
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: ${{ inputs.target_repo }}
           ref: ${{ inputs.target_ref }}
@@ -68,7 +68,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '3.12'
 
@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: byga-cli-anything-${{ inputs.job_id }}
           path: audit-report.json
