@@ -50,6 +50,14 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (page === "artifacts") {
+      request("/api/artifacts")
+        .then(data => setArtifacts(data))
+        .catch(cause => setError(cause instanceof Error ? cause.message : "Artifact listing failed"));
+    }
+  }, [page]);
+
   async function addRepository(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
