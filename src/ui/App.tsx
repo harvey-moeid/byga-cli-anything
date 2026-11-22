@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 type Repo = { id: string; full_name: string; default_branch: string; visibility: string };
-type Job = { id: string; repository_full_name: string; ref: string; task: string; status: string; created_at: string; result_json?: string | null; workflow_url?: string | null };\ntype Artifact = { id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string; job_id: string; repository_full_name: string };
+type Job = { id: string; repository_full_name: string; ref: string; task: string; status: string; created_at: string; result_json?: string | null; workflow_url?: string | null };
+type Artifact = { id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string; job_id: string; repository_full_name: string };
 const API = import.meta.env.VITE_API_BASE || "";
 
 async function request(path: string, init?: RequestInit) {
@@ -18,7 +19,8 @@ async function request(path: string, init?: RequestInit) {
 export default function App() {
   const [page, setPage] = useState("overview");
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);\n  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [stats, setStats] = useState<{ repositories: number }>({ repositories: 0 });
   const [error, setError] = useState("");
   const [url, setUrl] = useState("");
