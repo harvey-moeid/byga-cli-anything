@@ -112,7 +112,7 @@ jobs:
           TASK: ${{ inputs.task }}
         run: |
           report="{}"
-          if [[ -f audit-report.json ]]; then report=$(cat audit-report.json); fi
+          if [[ -f audit-report.json ]]; then report=$(jq -c '{file_count, license_file_count:(.license_files|length), dependency_manifest_count:(.dependency_manifests|length), workflow_file_count:(.workflow_files|length), warnings}' audit-report.json); fi
           status=COMPLETED
           error=""
           if [[ "$AUDIT_OUTCOME" != "success" || "$VALIDATION_OUTCOME" != "success" || "$TASK" == "generate" ]]; then
