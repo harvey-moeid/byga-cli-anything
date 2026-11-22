@@ -11,6 +11,53 @@ type RepositoryRow = { id: string; full_name: string };
 const app = new Hono<AppEnv>();
 const now = () => new Date().toISOString();
 
+async function sameSecret(a: string, b: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(a)),
+    crypto.subtle.digest("SHA-256", encoder.encode(b)),
+  ]);
+  const x = new Uint8Array(left);
+  const y = new Uint8Array(right);
+  let mismatch = 0;
+  for (let i = 0; i < x.length; i++) mismatch |= x[i] ^ y[i];
+  return mismatch === 0;
+}
+
+app.post("/internal/job-callback", async c => {
+  if (!c.env.JOB_CALLBACK_SECRET) return c.json({ error: "Callback secret is not configured" }, 503);
+  const authorization = c.req.header("Authorization") || "";
+  const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!supplied || !(await sameSecret(supplied, c.env.JOB_CALLBACK_SECRET))) {
+    return c.json({ error: "Unauthorized callback" }, 401);
+  }
+  const body = await c.req.json().catch(() => null);
+  const jobId = String(body?.job_id || "");
+  const status = String(body?.status || "");
+  const allowed = ["RUNNING", "TESTING", "COMPLETED", "FAILED", "CANCELLED"];
+  if (!jobId || !allowed.includes(status)) return c.json({ error: "Invalid callback payload" }, 400);
+  const existing = await c.env.DB.prepare("SELECT id FROM jobs WHERE id=?").bind(jobId).first<{ id: string }>();
+  if (!existing) return c.json({ error: "Unknown job" }, 404);
+  await c.env.DB.prepare(
+    "UPDATE jobs SET status=?,workflow_run_id=COALESCE(?,workflow_run_id),workflow_url=COALESCE(?,workflow_url),commit_sha=COALESCE(?,commit_sha),error_message=?,result_json=COALESCE(?,result_json),started_at=COALESCE(started_at,?),completed_at=? WHERE id=?",
+  ).bind(
+    status,
+    Number.isInteger(body.workflow_run_id) ? body.workflow_run_id : null,
+    typeof body.workflow_url === "string" ? body.workflow_url : null,
+    typeof body.commit_sha === "string" ? body.commit_sha : null,
+    typeof body.error_message === "string" ? body.error_message.slice(0, 2000) : null,
+    body.result_json ? JSON.stringify(body.result_json).slice(0, 20000) : null,
+    status === "RUNNING" ? now() : null,
+    ["COMPLETED", "FAILED", "CANCELLED"].includes(status) ? now() : null,
+    jobId,
+  ).run();
+  await c.env.DB.prepare("INSERT INTO audit_events(actor,action,target,metadata_json,created_at) VALUES(?,?,?,?,?)")
+    .bind("github-actions", "job.status", jobId, JSON.stringify({ status }), now()).run();
+  return c.json({ ok: true, job_id: jobId, status });
+});
+
+
+
 app.use("/api/*", async (c, next) => {
   const origin = c.req.header("Origin");
   if (origin && origin !== c.env.APP_ORIGIN) return c.json({ error: "Origin not allowed" }, 403);
