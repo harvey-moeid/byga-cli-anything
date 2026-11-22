@@ -14,7 +14,7 @@ Mobile-first control plane for manually auditing custom GitHub repositories and 
 See docs/OPERATIONS.md. Create D1, apply migrations/0001_init.sql, set Worker vars/secrets, deploy Worker and Pages manually, protect Pages with Access. No deploy workflow is included. Never use production D1 for local tests.
 
 ## Development
-Node 22+: npm ci && npm run dev. npm run typecheck, npm run lint, npm test, npm run build.
+Node 22+: corepack enable && pnpm install && pnpm dev. Checks: pnpm typecheck, pnpm lint, pnpm test, pnpm build. A committed lockfile is still required before reproducible production builds; the current CI resolves from package.json.
 
 ## Docs
 PRD, architecture, API, security, operations, BYGA adapter and acceptance criteria are under docs/.
