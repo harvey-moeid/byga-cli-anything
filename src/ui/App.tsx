@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 type Repo = { id: string; full_name: string; default_branch: string; visibility: string };
 type Job = { id: string; repository_full_name: string; ref: string; task: string; status: string; created_at: string; result_json?: string | null; workflow_url?: string | null };
-type Artifact = { id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string; job_id: string; repository_full_name: string };
+type Branch = { name: string; sha: string };\ntype Artifact = { id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string; job_id: string; repository_full_name: string };
 const API = import.meta.env.VITE_API_BASE || "";
 
 async function request(path: string, init?: RequestInit) {
@@ -20,7 +20,7 @@ export default function App() {
   const [page, setPage] = useState("overview");
   const [repos, setRepos] = useState<Repo[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);\n  const [branches, setBranches] = useState<Branch[]>([]);
   const [stats, setStats] = useState<{ repositories: number }>({ repositories: 0 });
   const [error, setError] = useState("");
   const [url, setUrl] = useState("");
@@ -73,6 +73,17 @@ export default function App() {
       setError(cause instanceof Error ? cause.message : "Repository validation failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function removeRepository(repository: Repo) {
+    if (!window.confirm("Remove " + repository.full_name + " from the allowlist?")) return;
+    try {
+      await request("/api/repositories/" + repository.id, { method: "DELETE" });
+      if (selected === repository.id) setSelected("");
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to remove repository");
     }
   }
 
@@ -141,6 +152,7 @@ export default function App() {
           {repos.map(repository => <div className="repo" key={repository.id}>
             <b>⌘</b><div>{repository.full_name}<small>{repository.default_branch} · {repository.visibility}</small></div>
             <span className="tag">Allowed</span>
+            <button className="logButton" onClick={() => void removeRepository(repository)}>Remove</button>
           </div>)}
         </section>}
 
@@ -150,7 +162,10 @@ export default function App() {
               <label>Repository<select value={selected} onChange={event => setSelected(event.target.value)} required>
                 <option value="">Choose repository</option>{repos.map(repository => <option value={repository.id} key={repository.id}>{repository.full_name}</option>)}
               </select></label>
-              <label>Branch / tag / ref<input value={ref} onChange={event => setRef(event.target.value)} required /></label>
+              <label>Known branch<select value={branches.some(branch => branch.name === ref) ? ref : ""} onChange={event => setRef(event.target.value)}>
+                <option value="">Choose a branch (optional)</option>{branches.map(branch => <option value={branch.name} key={branch.name}>{branch.name} · {branch.sha.slice(0, 8)}</option>)}
+              </select></label>
+              <label>Branch / tag / commit SHA<input value={ref} onChange={event => setRef(event.target.value)} required /></label>
               <label>Task<select value={task} onChange={event => setTask(event.target.value)}>
                 <option value="audit">Audit only</option><option value="generate">Generate harness (adapter required)</option>
               </select></label>
