@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 
 type Repo = { id: string; full_name: string; default_branch: string; visibility: string };
 type Job = { id: string; repository_full_name: string; ref: string; task: string; status: string; created_at: string; result_json?: string | null; workflow_url?: string | null };
-type Branch = { name: string; sha: string };\ntype Artifact = { id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string; job_id: string; repository_full_name: string };
+type Branch = { name: string; sha: string };
+type Artifact = { id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string; job_id: string; repository_full_name: string };
 const API = import.meta.env.VITE_API_BASE || "";
 
 async function request(path: string, init?: RequestInit) {
@@ -20,7 +21,8 @@ export default function App() {
   const [page, setPage] = useState("overview");
   const [repos, setRepos] = useState<Repo[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);\n  const [branches, setBranches] = useState<Branch[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [stats, setStats] = useState<{ repositories: number }>({ repositories: 0 });
   const [error, setError] = useState("");
   const [url, setUrl] = useState("");
@@ -217,8 +219,11 @@ function JobTable({ jobs }: { jobs: Job[] }) {
     try {
       const data = await request("/api/jobs/" + job.id + "/logs");
       const combined = (data.jobs || []).map((item: { name: string; status: string; conclusion: string | null; logs: string }) =>
-        "=== " + item.name + " · " + item.status + " · " + (item.conclusion || "in progress") + " ===\n" + item.logs
-      ).join("\n\n");
+        "=== " + item.name + " · " + item.status + " · " + (item.conclusion || "in progress") + " ===
+" + item.logs
+      ).join("
+
+");
       setLogText(previous => ({ ...previous, [job.id]: combined || "No log output returned." }));
     } catch (cause) {
       setLogError(cause instanceof Error ? cause.message : "Log retrieval failed");
