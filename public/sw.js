@@ -1,3 +1,4 @@
+/* global self, caches, URL, fetch */
 const CACHE = "byga-shell-v1";
 const SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
 self.addEventListener("install", event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))); self.skipWaiting(); });
