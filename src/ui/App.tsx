@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 type Repo = { id: string; full_name: string; default_branch: string; visibility: string };
-type Job = { id: string; repository_full_name: string; ref: string; task: string; status: string; created_at: string };
+type Job = { id: string; repository_full_name: string; ref: string; task: string; status: string; created_at: string; result_json?: string | null; workflow_url?: string | null };\ntype Artifact = { id: number; name: string; size_in_bytes: number; expired: boolean; expires_at: string; job_id: string; repository_full_name: string };
 const API = import.meta.env.VITE_API_BASE || "";
 
 async function request(path: string, init?: RequestInit) {
@@ -18,7 +18,7 @@ async function request(path: string, init?: RequestInit) {
 export default function App() {
   const [page, setPage] = useState("overview");
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);\n  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [stats, setStats] = useState<{ repositories: number }>({ repositories: 0 });
   const [error, setError] = useState("");
   const [url, setUrl] = useState("");
@@ -151,7 +151,11 @@ export default function App() {
         </>}
 
         {page === "artifacts" && <section className="panel">
-          <h3>Artifacts</h3><p>Artifact tersedia setelah workflow selesai dan upload berhasil. Retensi awal 7 hari.</p>
+          <h3>Artifacts</h3><p>File disimpan di GitHub Actions dengan retensi 7 hari. Daftar ini hanya menampilkan artifact yang benar-benar tersedia.</p>
+          {artifacts.length ? artifacts.map(artifact => <div className="repo" key={artifact.id}>
+            <b>ZIP</b><div><strong>{artifact.name}</strong><small>{artifact.repository_full_name} · {(artifact.size_in_bytes / 1024).toFixed(1)} KB · Expires {new Date(artifact.expires_at).toLocaleDateString("id-ID")}</small></div>
+            <a href={API + "/api/artifacts/" + artifact.id + "/download?jobId=" + encodeURIComponent(artifact.job_id)}>Download ↧</a>
+          </div>) : <p>Belum ada artifact. Jalankan audit manual dan tunggu workflow selesai.</p>}
           <a href="https://github.com/harvey-moeid/byga-cli-anything/actions" target="_blank" rel="noreferrer">Open GitHub Actions ↗</a>
         </section>}
 
@@ -177,6 +181,11 @@ function JobTable({ jobs }: { jobs: Job[] }) {
       <td>{job.task}</td><td><span className={"status " + job.status.toLowerCase()}>{job.status}</span></td>
       <td>{new Date(job.created_at).toLocaleString("id-ID")}</td>
     </tr>)}</tbody></table>
+    {jobs.filter(job => job.result_json).map(job => <details className="report" key={job.id}>
+      <summary>Audit report · {job.repository_full_name} · {job.id.slice(0, 8)}</summary>
+      <pre>{(() => { try { return JSON.stringify(JSON.parse(job.result_json || "{}"), null, 2); } catch { return "Report JSON tidak valid."; } })()}</pre>
+      {job.workflow_url && <a href={job.workflow_url} target="_blank" rel="noreferrer">Open workflow logs ↗</a>}
+    </details>)}
     {!jobs.length && <p>No executions yet.</p>}
   </div>;
 }
