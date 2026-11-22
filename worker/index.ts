@@ -3,7 +3,12 @@ import { cors } from "hono/cors";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Env } from "./types";
 
-type AppEnv = { Bindings: Env; Variables: { actor: string } };\ntype AppContext = Context<AppEnv>;\ntype GithubRepository = { id: number; owner: { login: string }; name: string; full_name: string; default_branch: string; visibility: string; description: string | null; archived: boolean; disabled: boolean };\ntype GithubBranch = { name: string; commit: { sha: string } };\ntype RepositoryRow = { id: string; full_name: string };\nconst app = new Hono<AppEnv>();
+type AppEnv = { Bindings: Env; Variables: { actor: string } };
+type AppContext = Context<AppEnv>;
+type GithubRepository = { id: number; owner: { login: string }; name: string; full_name: string; default_branch: string; visibility: string; description: string | null; archived: boolean; disabled: boolean };
+type GithubBranch = { name: string; commit: { sha: string } };
+type RepositoryRow = { id: string; full_name: string };
+const app = new Hono<AppEnv>();
 const now = () => new Date().toISOString();
 
 app.use("/api/*", async (c, next) => {
