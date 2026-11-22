@@ -164,7 +164,7 @@ export default function App() {
           <h3>Artifacts</h3><p>File disimpan di GitHub Actions dengan retensi 7 hari. Daftar ini hanya menampilkan artifact yang benar-benar tersedia.</p>
           {artifacts.length ? artifacts.map(artifact => <div className="repo" key={artifact.id}>
             <b>ZIP</b><div><strong>{artifact.name}</strong><small>{artifact.repository_full_name} · {(artifact.size_in_bytes / 1024).toFixed(1)} KB · Expires {new Date(artifact.expires_at).toLocaleDateString("id-ID")}</small></div>
-            <a href={API + "/api/artifacts/" + artifact.id + "/download?jobId=" + encodeURIComponent(artifact.job_id)}>Download ↧</a>
+            {artifact.expired ? <span className="tag">Expired</span> : <a href={API + "/api/artifacts/" + artifact.id + "/download?jobId=" + encodeURIComponent(artifact.job_id)}>Download ↧</a>}
           </div>) : <p>Belum ada artifact. Jalankan audit manual dan tunggu workflow selesai.</p>}
           <a href="https://github.com/harvey-moeid/byga-cli-anything/actions" target="_blank" rel="noreferrer">Open GitHub Actions ↗</a>
         </section>}
