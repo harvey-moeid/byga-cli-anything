@@ -53,6 +53,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!selected) { setBranches([]); return; }
+    request("/api/repositories/" + selected + "/branches")
+      .then(data => setBranches(data))
+      .catch(cause => setError(cause instanceof Error ? cause.message : "Branch listing failed"));
+  }, [selected]);
+
+  useEffect(() => {
     if (page === "artifacts") {
       request("/api/artifacts")
         .then(data => setArtifacts(data))
