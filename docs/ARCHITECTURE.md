@@ -13,10 +13,9 @@ MCP BYGA is optional. Its available tools can help during an interactive BYGA se
 
 ```mermaid
 flowchart TD
-  U[User browser / PWA] --> A[Cloudflare Access]
-  A --> P[React + Vite Pages]
-  P --> W[Cloudflare Worker / Hono]
-  W --> D[(D1 metadata)]
+  U[User browser / PWA] --> P[React + Vite Pages]
+  P -->|session cookie + CSRF header| W[Cloudflare Worker / Hono]
+  W --> D[(D1 metadata + sessions)]
   W --> G[GitHub API / Actions]
   G --> R[Ephemeral hosted runner]
   R --> AR[Actions artifacts]
@@ -28,9 +27,9 @@ Workers authenticate, validate, orchestrate and persist bounded metadata. GitHub
 
 ## Data model
 
-Migration `0001_init.sql` remains the legacy repository/job/audit foundation. Migration `0002_workspace.sql` adds:
+Migration `0001_init.sql` is the legacy repository/job/audit foundation. Migration `0002_workspace.sql` adds:
 
-- `users`: verified Access identity key only; no credentials.
+- `users`: operator identity row (`owner`); no credentials.
 - `projects`: owner-scoped project and optional allowlisted repository association.
 - `project_contexts`: immutable versioned Markdown context with bounded metadata.
 - `ai_tasks`: provider/task prompt, manual handoff lifecycle and imported result summary.
@@ -38,11 +37,15 @@ Migration `0001_init.sql` remains the legacy repository/job/audit foundation. Mi
 - `artifacts`: metadata for GitHub Actions or optional R2 objects.
 - `user_settings`: owner-scoped non-secret preferences.
 
+Migration `0003_password_auth.sql` adds `sessions` (SHA-256 of the session token, expiry, revocation) and `login_attempts` (HMAC-keyed rate-limit counters). It supersedes the Cloudflare Access identity comment in 0002: identity is now the fixed `owner` user created at first successful login.
+
 Secrets and environment variables must never be stored in context, prompts, results, artifacts, or settings.
 
 ## Security invariants
 
-- Cloudflare Access JWT is verified server-side for all `/api/*` routes.
+- Every `/api/*` route except health and the auth endpoints requires a valid, unexpired, unrevoked session.
+- State-changing requests require an exact Origin match and a CSRF token derived from the session.
+- `APP_PASSWORD` is a Worker secret only; the password, raw session token and raw client address are never stored.
 - GitHub credentials remain Worker secrets; no target write credential is sent to AI or target checkout.
 - Repository source and AI output are untrusted data.
 - Imports are staged and validated; no direct application to `main`.

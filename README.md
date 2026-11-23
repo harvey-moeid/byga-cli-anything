@@ -7,14 +7,14 @@ Mobile-first control plane for manually auditing custom GitHub repositories and 
 - Workers only authenticate/orchestrate; Python and harness workloads run on ephemeral GitHub-hosted runners.
 - Target source is untrusted. Static audit does not execute target scripts.
 - Actions artifacts are the initial artifact store (7-day retention); R2 deferred to avoid duplicate storage.
-- Cloudflare Access protects the dashboard; Worker independently validates Access JWT.
+- Sign-in uses a single password (`APP_PASSWORD` Worker secret) and an HttpOnly session cookie with CSRF protection; see docs/SECURITY.md. Cloudflare Access is not used.
 - BYGA MCP is not assumed to expose an HTTP agent endpoint. Generation is fail-closed until a compatible endpoint is configured and contract-tested.
 
 ## Setup
-See docs/OPERATIONS.md. Create D1, apply migrations/0001_init.sql, set Worker vars/secrets, deploy Worker and Pages manually, protect Pages with Access. No deploy workflow is included. Never use production D1 for local tests.
+See docs/OPERATIONS.md. Create D1, apply migrations/0001, 0002 and 0003 in order, set Worker vars/secrets (including `APP_PASSWORD`), deploy Worker and Pages manually. No deploy workflow is included. Never use production D1 for local tests.
 
 ## Development
-Node 22+: corepack enable && pnpm install && pnpm dev. Checks: pnpm typecheck, pnpm lint, pnpm test, pnpm build. A committed lockfile is still required before reproducible production builds; the current CI resolves from package.json.
+Node 22+: corepack enable && pnpm install && pnpm dev. Checks: pnpm typecheck, pnpm lint, pnpm test, pnpm build. Worker tests use Node's built-in `node:sqlite` with the real migrations, so Node 22.13+ is required. A committed lockfile is still required before reproducible production builds; the current CI resolves from package.json.
 
 ## Docs
 PRD, architecture, API, security, operations, BYGA adapter and acceptance criteria are under docs/.

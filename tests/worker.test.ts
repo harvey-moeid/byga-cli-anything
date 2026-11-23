@@ -16,16 +16,15 @@ function mockEnv(secret = "test-callback-secret") {
     GITHUB_TOKEN: "not-used-in-these-tests",
     GITHUB_OWNER: "harvey-moeid",
     GITHUB_REPO: "byga-cli-anything",
-    ACCESS_TEAM_DOMAIN: "example.cloudflareaccess.com",
-    ACCESS_AUD: "test-aud",
+    APP_PASSWORD: "test-password-for-unit-tests",
     APP_ORIGIN: "https://dashboard.example.com",
     JOB_CALLBACK_SECRET: secret,
   } as unknown as Env;
 }
 
 describe("Worker authentication boundary", () => {
-  it("rejects API requests without a Cloudflare Access JWT", async () => {
-    const response = await app.request("/api/health", {}, mockEnv());
+  it("rejects API requests that carry no session", async () => {
+    const response = await app.request("/api/dashboard", {}, mockEnv());
     expect(response.status).toBe(401);
   });
 

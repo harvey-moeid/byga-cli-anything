@@ -1,34 +1,24 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
-import { createRemoteJWKSet, jwtVerify } from "jose";
-import type { Env } from "./types";
+import type { AppEnv } from "./types";
+import { constantTimeEqual } from "./auth";
+import { authRoutes, hasValidCsrf, sessionFromContext } from "./auth-routes";
 
-type AppEnv = { Bindings: Env; Variables: { actor: string } };
 type AppContext = Context<AppEnv>;
 type GithubRepository = { id: number; owner: { login: string }; name: string; full_name: string; default_branch: string; visibility: string; description: string | null; size: number; archived: boolean; disabled: boolean };
 type GithubBranch = { name: string; commit: { sha: string } };
 type RepositoryRow = { id: string; full_name: string };
 const app = new Hono<AppEnv>();
 const now = () => new Date().toISOString();
-
-async function sameSecret(a: string, b: string): Promise<boolean> {
-  const encoder = new TextEncoder();
-  const [left, right] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(a)),
-    crypto.subtle.digest("SHA-256", encoder.encode(b)),
-  ]);
-  const x = new Uint8Array(left);
-  const y = new Uint8Array(right);
-  let mismatch = 0;
-  for (let i = 0; i < x.length; i++) mismatch |= x[i] ^ y[i];
-  return mismatch === 0;
-}
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+// Reachable without a session. /api/auth/* handlers do their own checks; everything else is guarded below.
+const PUBLIC_API_PATHS = new Set(["/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/session"]);
 
 app.post("/internal/job-callback", async c => {
   if (!c.env.JOB_CALLBACK_SECRET) return c.json({ error: "Callback secret is not configured" }, 503);
   const authorization = c.req.header("Authorization") || "";
   const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!supplied || !(await sameSecret(supplied, c.env.JOB_CALLBACK_SECRET))) {
+  if (!supplied || !(await constantTimeEqual(supplied, c.env.JOB_CALLBACK_SECRET))) {
     return c.json({ error: "Unauthorized callback" }, 401);
   }
   const contentLength = Number(c.req.header("Content-Length") || 0);
@@ -58,37 +48,39 @@ app.post("/internal/job-callback", async c => {
   return c.json({ ok: true, job_id: jobId, status });
 });
 
-
-
+// 1. Response hardening and exact-origin enforcement. State-changing requests must carry an allowed Origin.
 app.use("/api/*", async (c, next) => {
+  c.header("Cache-Control", "no-store");
+  c.header("X-Content-Type-Options", "nosniff");
   const origin = c.req.header("Origin");
-  if (origin && origin !== c.env.APP_ORIGIN) return c.json({ error: "Origin not allowed" }, 403);
+  const rejected = origin ? origin !== c.env.APP_ORIGIN : !SAFE_METHODS.has(c.req.method.toUpperCase());
+  if (rejected) return c.json({ error: "Origin not allowed" }, 403);
   await next();
 });
+
+// 2. CORS: credentials are only ever allowed for the configured application origin.
 app.use("/api/*", cors({
   origin: (origin, c) => origin === c.env.APP_ORIGIN ? origin : "",
   allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-  allowHeaders: ["Content-Type"],
+  allowHeaders: ["Content-Type", "X-CSRF-Token"],
+  exposeHeaders: ["Retry-After"],
+  credentials: true,
   maxAge: 600,
 }));
+
+// 3. Session authentication and CSRF protection for every non-public API route.
 app.use("/api/*", async (c, next) => {
-  const token = c.req.header("Cf-Access-Jwt-Assertion");
-  if (!token) return c.json({ error: "Cloudflare Access authentication required" }, 401);
-  try {
-    const configured = c.env.ACCESS_TEAM_DOMAIN;
-    const teamUrl = new URL(configured.startsWith("http") ? configured : "https://" + configured);
-    const jwksUrl = c.env.ACCESS_JWKS_URL || new URL("/cdn-cgi/access/certs", teamUrl).toString();
-    const jwks = createRemoteJWKSet(new URL(jwksUrl));
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer: teamUrl.origin,
-      audience: c.env.ACCESS_AUD,
-    });
-    c.set("actor", String(payload.email || payload.sub || "access-user"));
-  } catch {
-    return c.json({ error: "Invalid Cloudflare Access identity" }, 401);
+  if (PUBLIC_API_PATHS.has(c.req.path)) return next();
+  const session = await sessionFromContext(c);
+  if (!session) return c.json({ error: "Authentication required" }, 401);
+  if (!SAFE_METHODS.has(c.req.method.toUpperCase()) && !(await hasValidCsrf(c, session))) {
+    return c.json({ error: "Invalid CSRF token" }, 403);
   }
+  c.set("actor", session.userId);
   await next();
 });
+
+app.route("/api/auth", authRoutes);
 
 async function github<T = unknown>(c: AppContext, path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch("https://api.github.com" + path, {
@@ -342,6 +334,7 @@ app.get("/api/artifacts/:artifactId/download", async c => {
 
 app.get("/api/integrations", c => c.json({
   github: "worker-secret-required", cloudflare: "worker-active",
+  auth: "password-session",
   agent: "not-configured", execution: "manual-github-actions",
 }));
 app.get("/api/activity", async c => {

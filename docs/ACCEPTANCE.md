@@ -1,6 +1,7 @@
 # Acceptance
 
-- [ ] Cloudflare Access login and JWT validation verified on deployment.
+- [x] Password login, session cookie, logout, revocation, CSRF/Origin checks and login rate limiting are implemented and covered by automated tests (verified in CI, not yet on a deployment).
+- [ ] Login and session behaviour verified on a real deployment (HTTPS, chosen cookie SameSite setting, Android browser).
 - [ ] Add/validate repository; allowlist soft-disable.
 - [ ] Manual dispatch creates actual Actions run.
 - [ ] Audit is metadata-only and does not execute target scripts.
